@@ -19,12 +19,26 @@ var http = httpObj.createServer(app);
 
 // to encrypt/decrypt passwords
 var bcrypt = require("bcrypt");
+var nodemailer = require("nodemailer");
+
+var nodemailerFrom = "sumrariya@gmail.com";
+var nodemailerObject = {
+    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+        user: "sumrariya@gmail.com",
+        pass: "uoxg jvby frlz bowl"
+    }
+};
 
 // to store files
 var fileSystem = require("fs");
 
 // to start the session
 var session = require("express-session");
+const { resourceUsage } = require("process");
 app.use(session({
     secret: 'secret key',
     resave: false,
@@ -42,7 +56,7 @@ app.use("/public/fonts", express.static(__dirname + "/public/fonts"));
 app.set("view engine", "ejs");
 
 // main URL of website
-var mainURL = "http://localhost:3000";
+var mainURL = "http://localhost:3005";
 
 // global database object
 var database = null;
@@ -188,8 +202,33 @@ function recursiveSearchShared (files, query) {
     }
 }
 
+// recursive function to get the shared folder
+function recursiveGetSharedFolder(files, _id)
+{
+    var singleFile = null;
+
+    for(var a =0;a<files.length; a++)
+    {
+        var file = (typeof files[a].file === "undefined")? files[a] : files[a].file;
+
+        if(file.type == "folder")
+        {
+            if(file._id == _id){
+                return file;
+            }
+
+            if(file.files.length > 0 ){
+                singleFile = recursiveGetSharedFolder(file.files, _id);
+                if(singleFile != null){
+                    return singleFile;
+                }
+            }
+        }
+    }
+}
+
 // start the http server
-http.listen(3000, function () {
+http.listen(3005, function () {
     console.log("Server started at " + mainURL);
 
     // connect with mongo DB server
@@ -249,18 +288,49 @@ http.listen(3000, function () {
             result.redirect("/Login");
         });
 
-        app.get("/Blog", async function (request, result) {
-            // render an HTML page with number of pages, and posts data
-            result.render("Blog", {
-                request: request
-            });
-        });
 
         // get all files shared with logged-in user
         app.get("/SharedWithMe/:_id?", async function (request, result) {
-            result.render("SharedWithMe", {
-                "request": request
-            });
+            const _id = request.params._id;
+            if(request.session.user)
+            {
+                var user = await database.collection("users").findOne({"_id": ObjectId(request.session.user._id)});
+
+                var files = null;
+                var folderName ="";
+                if(typeof _id == "undefined")
+                {
+                    files = user.sharedWithMe;
+                } else {
+                    var folderObj = await recursiveGetSharedFolder(user.sharedWithMe, _id);
+
+                    if (folderObj == null){
+                        request.status = "error";
+                        request.message = "Folder not found.";
+                        result.render("Error",{
+                            "request":request
+                        });
+                        return false;
+                    }
+                    files = folderObj.files;
+                    folderName = folderObj.folderName;
+                }
+                if (files==null){
+                    request.status = "error";
+                    request.message = "Directory not found,";
+                    result.render("Error", {"request":request});
+                    return false;
+                }
+
+                result.render("SharedWithMe", {
+                    "request" : request,
+                    "files" : files,
+                    "_id": _id,
+                    "folderName": folderName
+                });
+                return false;
+            }
+            result.redirect("/Login");
         });
 
         app.post("/DeleteLink", async function (request, result) {
@@ -309,7 +379,6 @@ http.listen(3000, function () {
                 var links = await database.collection("public_links").find({
                     "uploadedBy._id": ObjectId(request.session.user._id)
                 }).toArray();
-
                 result.render("MySharedLinks", {
                     "request": request,
                     "links": links
@@ -549,7 +618,7 @@ http.listen(3000, function () {
                             });
 
                             request.session.status = "success";
-                            request.session.message = "Image has been uploaded. Try our premium version for image compression.";
+                            request.session.message = "Image has been uploaded.";
 
                             result.redirect("/MyUploads/" + _id);
                         });
@@ -610,8 +679,17 @@ http.listen(3000, function () {
 
             bcrypt.compare(password, user.password, function (error, isVerify) {
                 if (isVerify) {
-                    request.session.user = user;
-                    result.redirect("/");
+                    if(user.isVerified){
+                        request.session.user = user;
+                        result.redirect("/");
+
+                        return false;
+                    }
+                    request.status = "error";
+                    request.message = "Kindly verify your email";
+                    result.render("Login", {
+                        "request": request
+                    });
 
                     return false;
                 }
@@ -622,6 +700,172 @@ http.listen(3000, function () {
                     "request": request
                 });
             });
+        });
+
+        //forget password
+        app.get("/ForgotPassword", function(request, result){
+            result.render("ForgotPassword", {
+                "request": request
+            });
+        });
+
+        app.post("/SendRecoveryLink", async function(request, result){
+            var email = request.fields.email;
+            var user = await database.collection("users").findOne({
+                "email": email
+            });
+
+            if (user == null){
+                request.status = "error";
+                request.message = "Email does not exist";
+
+                result.render("ForgotPassword", {
+                    "request": request
+                });
+                return false;
+            }
+
+            var reset_token = new Date().getTime();
+
+            await database.collection("users").findOneAndUpdate({
+                "email": email
+            }, {
+                $set: {
+                    "reset_token": reset_token
+                }
+            });
+
+            var transporter = nodemailer.createTransport(nodemailerObject);
+
+            var text = "Please click the following link to reset your password: " + mainURL + "/ResetPassword/" + email + "/" + reset_token;
+            var html = "Please click the following link to reset your password: <br><br> <a href= '" + mainURL + "/ResetPassword/" + email + "/" + reset_token + "'>Reset Password</a> <br><br> Thank You.";
+
+            transporter.sendMail({
+                from: nodemailerFrom,
+                to: email,
+                subject: "Reset Password",
+                test: text,
+                html: html
+            }, function(error, info){
+                if (error){
+                    console.error(error);
+                }
+                else{
+                    console.log("Email sent: " + info.response);
+                }
+
+                request.status = "success";
+                request.message = "Email has been sent with the link to recover the password.";
+
+                result.render("ForgotPassword", {
+                    "request": request
+                });
+            });
+        });
+
+        app.get("/ResetPassword/:email/:reset_token", async function(request, result){
+            var email = request.params.email;
+            var reset_token = request.params.reset_token;
+
+            var user = await database.collection("users").findOne({
+                $and: [{
+                    "email": email
+                }, {
+                    "reset_token": parseInt(reset_token)
+                }]
+            });
+
+            console.log("1");
+            console.log(user);
+
+            if (user == null){
+                request.status = "error";
+                request.message = "Link is expired.";
+                result.render("Error", {
+                    "request": request
+                });
+                return false;
+            }
+
+            result.render("ResetPassword", {
+                "request": request,
+                "email": email,
+                "reset_token": reset_token
+            });
+        });
+
+        
+
+
+        app.post("/ResetPassword", async function(request, result){
+            var email = request.fields.email;
+            var reset_token = request.fields.reset_token;
+            var new_password = request.fields.new_password;
+            var confirm_password = request.fields.confirm_password;
+
+
+            if (new_password != confirm_password){
+                request.status = "error";
+                request.message = "Password does not match.";
+
+                result.render("ResetPassword", {
+                    "request": request,
+                    "email": email,
+                    "reset_token": reset_token
+                });
+                return false;
+            }
+
+            var user = await database.collection("users").findOne({
+                $and: [{
+                    "email": email,
+                }, {
+                    "reset_token": parseInt(reset_token)
+                }]
+            });
+
+            console.log(user);
+
+            if (user == null){
+                request.status = "error";
+                request.message = "Email does not exist or recovery link expired.";
+
+
+                result. render("ResetPassword", {
+                    "request": request,
+                    "email": email,
+                    "reset_token": reset_token
+                });
+
+                return false;
+            }
+
+            bcrypt.hash(new_password, 10, async function(error, hash){
+                await database.collection("users").findOneAndUpdate({
+                    $and: [{
+                        "email": email,
+                    }, {
+                        "reset_token": parseInt(reset_token)
+                    }]
+                }, {
+                    $set: {
+                        "reset_token": "",
+                        "password": hash
+                    }
+                });
+
+                request.status = "success";
+                request.message = " Password has been changed. Please try login again.";
+
+                result.render("Login", {
+                    "request": request
+                });
+            });
+        });
+
+        app.get("/Logout", function(request, result){
+            request.session.destroy();
+            result.redirect("/");
         });
 
         // register the user
@@ -650,13 +894,37 @@ http.listen(3000, function () {
                         "isVerified": isVerified,
                         "verification_token": verification_token
                     }, async function (error, data) {
+                        var transporter = nodemailer.createTransport(nodemailerObject);
+                        var text = "Please verify your account by clicking the following link: "
+                        + mainURL + "/verifyEmail/" + email + "/" + verification_token;
 
-                        request.status = "success";
-                        request.message = "Signed up successfully. You can login now.";
+                        var html = "Please verify your account by clicking on the following link: <br><br> <a href= '" + 
+                        mainURL + "/verifyEmail/" + email + "/" + verification_token + "'>Confirm Email</a?<br><br> Thank You. ";
 
-                        result.render("Register", {
-                            "request": request
+                        await transporter.sendMail({
+                            from: nodemailerFrom,
+                            to: email,
+                            subject: "Email Verification",
+                            text: text,
+                            html: html,
+
+                        }, function(error, info){
+                            if(error){
+                                console.log(error);
+                            }
+                            else{
+                                console.log("Email sent: " + info.response);
+                            }
+
+                            request.status = "success";
+                            request.message = "Signed up successfully. An email has been sent to verify your account.Once verified, you will be able to login.";
+
+                            result.render("Register", {
+                                "request": request
+                            });
                         });
+                        
+                        
                         
                     });
                 });
@@ -665,6 +933,45 @@ http.listen(3000, function () {
                 request.message = "Email already exist.";
 
                 result.render("Register", {
+                    "request": request
+                });
+            }
+        });
+
+        app.get("/verifyEmail/:email/:verification_token", async function(request, result){
+            var email = request.params.email;
+            var verification_token = request.params.verification_token;
+            var user = await database.collection("users").findOne({
+                $and: [{
+                    "email": email,
+                }, {"verification_token": parseInt(verification_token)
+            }]
+            });
+
+            if (user == null ){
+                request.status = "error";
+                request.message = "Email does not exist or verification link is expired";
+                result.render("Login", {
+                    "request": request
+                });
+            }
+            else{
+                await database.collection("users").findOneAndUpdate({
+                    $and: [{
+                        "email": email,
+                    }, {
+                        "verification_token": parseInt(verification_token)
+                    }]
+                }, {
+                    $set: {
+                        "verification_token": "",
+                        "isVerified": true
+                    }
+                });
+
+                request.status = "success";
+                request.message = "Account has been verified. Please try login.";
+                result.render("Login", {
                     "request": request
                 });
             }
