@@ -244,13 +244,9 @@ http.listen(3005, function () {
         //share file with user
 
         app.post("/Share", async function (request,result) {
-            console.log("1111111");
-            console.log("1111111");
-            console.log("The request issss ");
-            console.log(request);
             const _id =  request.fields._id
-;
-            console.log("hi");
+
+  
             console.log(_id);
             const type = request.fields.type;
             const email = request.fields.email;
@@ -754,7 +750,7 @@ http.listen(3005, function () {
                             });
 
                             request.session.status = "success";
-                            request.session.message = "Image has been uploaded.";
+                            request.session.message = "File has been uploaded.";
 
                             result.redirect("/MyUploads/" + _id);
                         });
