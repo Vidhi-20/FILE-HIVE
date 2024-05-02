@@ -89,6 +89,12 @@
                         }
                     }
                 </script>
+                <button type="button" class="btn btn-primary btn-block" onclick="showShareModal(this);"
+                data-dismiss="modal"
+                
+                data-type="file">
+                    Share via email
+                </button>
 
                 <form method="POST" action="<%= request.mainURL %>/DeleteFile"
                     id="form-delete-file">
@@ -99,6 +105,43 @@
                         Delete
                     </button>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id = "shareModal">
+    <div class = "modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title">Share with</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">a</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="<%= request.mainURL %>/Share" id="form-share-modal">
+                    <input type="hidden" name="_id" required/>
+                    <input type="hidden" name="type" required/>
+
+                    <div class="form-group">
+                        <label>Enter email</label>
+                        <input type="email" name="email" class="form-control" required />
+                        <button type="button" class="btn btn-default" onclick="searchUserForShare(this);"
+                        style="margin-top: 10px;">
+                        Confirm User
+                    </button>
+                    </div>
+                    <div id = "user-details-for-share"></div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">
+                    Close
+                </button>
+
+                <input type="submit" class="btn btn-primary" value="Share" form="form-share-modal" />
             </div>
         </div>
     </div>
@@ -125,6 +168,52 @@
                 }
             });
     }
+    function searchUserForShare(self) {
+        self.innerHTML = "Loading..";
+        self.getAttribute("disabled", "disabled");
+
+        var ajax = new XMLHttpRequest();
+        ajax.open("POST", document.getElementById("base-url").value + "/GetUser", true);
+
+        ajax.onreadystatechange = function() {
+            if(this.readyState==4){
+                if(this.status==200){
+                    var data = JSON.parse(this.responseText);
+                    self.removeAttribute("disabled");
+                    self.innerHTML = "Confirm User";
+
+                    if(data.status=="error") {
+                        swal ("Error", data.message, "error");
+                    }
+
+                    if(data.status =="success"){
+                        var html ="";
+                        html += "<p>Name: "+ data.user.name + "</p>";
+                        document.getElementById("user-details-for-share").innerHTML = html;
+                    }
+                }
+                if(this.status == 500) {
+                    console.log(this.responseText);
+                }
+            }
+        };
+
+        var form = document.getElementById("form-share-modal");
+        var formData = new FormData(form);
+        ajax.send(formData);
+    }
+
+    function showShareModal(self) 
+    {
+    // Set the _id value from the data-id attribute of the clicked element
+    document.getElementById("form-share-modal")._id.value = self.getAttribute("data-id");
+    
+    // Set the type value to "file"
+    document.getElementById("form-share-modal").type.value = "file";
+    
+    // Show the share modal
+    $("#shareModal").modal("show");
+}
 
     function viewFile(self) {
         var _id = self.getAttribute("data-id");

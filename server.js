@@ -39,6 +39,7 @@ var fileSystem = require("fs");
 // to start the session
 var session = require("express-session");
 const { resourceUsage } = require("process");
+const { runInNewContext } = require("vm");
 app.use(session({
     secret: 'secret key',
     resave: false,
@@ -239,6 +240,132 @@ http.listen(3005, function () {
         // connect database (it will automatically create the database if not exists)
         database = client.db("file_transfer");
         console.log("Database connected.");
+
+        //share file with user
+
+        app.post("/Share", async function (request,result) {
+            console.log("1111111");
+            console.log("1111111");
+            console.log("The request issss ");
+            console.log(request);
+            const _id =  request.fields._id
+;
+            console.log("hi");
+            console.log(_id);
+            const type = request.fields.type;
+            const email = request.fields.email;
+            
+            if(request.session.user) {
+                var user = await database.collection("users").findOne({
+                    "email": email
+                });
+
+            if(user == null)
+            {
+                request.session.status = "error";
+                request.session.message ="User" + email + "does not exists.";
+                result.redirect("/MyUploads");
+                return false;
+            }
+
+            if (!user.isVerified) {
+                request.session.status = "error";
+                request.session.message ="User " + user.name+ " account is not verified.";
+                result.redirect("/MyUploads");
+                return false;
+            }
+
+            var me = await database.collection("users").findOne({"_id": ObjectId(request.session.user._id)
+        });
+        var file = null;
+
+        if(type == "file") {
+            file = await recursiveGetFile (me.uploaded, _id);
+        }
+        if(file == null) {
+            request.session.status ="error";
+            request.session.message = "File does not exists. ";
+            result.redirect("/MyUploads");
+
+            return false;
+        }
+        file._id = ObjectId(file._id);
+
+        const sharedBy = me;
+
+        await database.collection("users").findOneAndUpdate({
+            "_id": user._id
+        }, {
+            $push: {
+                "sharedWithMe": {
+                    "_id": ObjectId(),
+                    "file":file,
+                    "sharedBy": {
+                        "_id":ObjectId(sharedBy,_id),
+                        "name": sharedBy.name,
+                        "email": sharedBy.email
+                    },
+                    "createdAt": new Date().getTime()
+                }
+            }
+        });
+
+        request.session.status = "success";
+        request.session.message = "File has been shared with "+ user.name+ " .";
+        const backURL = request.header("Referer") || "/";
+
+        result.redirect(backURL);
+    }
+    result.redirect("/Login");
+
+});
+
+        
+        //get user for confirmation
+        app.post("/GetUser", async function (request,result){
+            const email = request.fields.email;
+            if(request.session.user) {
+                var user = await database.collection("users").findOne({
+                    "email": email
+                });
+
+                if(user == null)
+                {
+                    result.json({
+                        "status":"error",
+                        "message": "User" + email + "does not exists."
+                    });
+                    return false;
+                }
+
+                if (!user.isVerified) {
+                    result.json({
+                        "status":"error",
+                        "message": "User " + user.name+ " account is not verified."
+                    });
+
+                    return false;
+                }
+
+                result.json({
+                    "status":"success",
+                    "message": "Data has been fetched.",
+                    "user": {
+                        "_id": user._id,
+                        "name": user.name,
+                        "email": user.email
+                    }
+                });
+                return false;
+            }
+            result.json ({
+                "status":"error",
+                "message": "Please login to perform this action."
+            });
+
+            return false;
+        });
+
 
         app.get("/pro-versions", function (request, result) {
             result.render("proVersions", {
@@ -570,6 +697,15 @@ http.listen(3005, function () {
 
             result.redirect("/Login");
         });
+
+        app.get("/MyUploads", function(req, res) {
+            // Assuming you have the _id value available in your route handler
+            const _id = "your_id_value"; // Replace "your_id_value" with the actual _id value
+        
+            // Pass the _id variable to the template when rendering it
+            res.render("MyUploads", { uploaded: uploaded, _id: _id }); // Assuming uploaded is the array you want to pass
+        });
+        
 
         // upload new file
         app.post("/UploadFile", async function (request, result) {
