@@ -57,7 +57,7 @@ body {
     margin-top: 50px;
 }
 #homeApp #features .card-body {
-    height: 200px;
+    height: 100%;
 }
 #homeApp .card-header img {
     width: 50px;
