@@ -750,7 +750,7 @@ http.listen(3005, function () {
                             });
 
                             request.session.status = "success";
-                            request.session.message = "Image has been uploaded.";
+                            request.session.message = "File has been uploaded.";
 
                             result.redirect("/MyUploads/" + _id);
                         });
